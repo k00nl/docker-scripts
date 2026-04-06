@@ -1,6 +1,8 @@
 @echo off
 setlocal enabledelayedexpansion
 
+set SSH_OPTS=-o ServerAliveInterval=15 -o ServerAliveCountMax=4
+
 REM Load SERVER_USER, SERVER_IP, IMAGE, COMPOSE_FILE from prod.env
 for /f "usebackq tokens=1,* delims==" %%A in ("prod.env") do (
     if "%%A"=="SERVER_USER"  set SERVER_USER=%%B
@@ -35,7 +37,7 @@ set REMOTE_PATH=/%IMAGE%
 REM Check if cancelling scheduled down: down.cmd stop at
 if /i "%~1"=="stop" if /i "%~2"=="at" (
     echo Cancelling scheduled downs for %IMAGE%...
-    ssh %SERVER% "for job in $(atq | awk '{print $1}'); do at -c $job 2>/dev/null | grep -q 'cd %REMOTE_PATH%' && atrm $job && echo 'Removed job '$job; done"
+    ssh %SSH_OPTS% %SERVER% "for job in $(atq | awk '{print $1}'); do at -c $job 2>/dev/null | grep -q 'cd %REMOTE_PATH%' && atrm $job && echo 'Removed job '$job; done"
     echo Done.
     pause
     exit /b 0
@@ -71,7 +73,7 @@ REM === IMMEDIATE DOWN ===
 
 REM Check if already down
 echo Checking if containers are running...
-for /f %%R in ('ssh %SERVER% "cd %REMOTE_PATH% 2>/dev/null && docker compose --env-file prod.env -f %COMPOSE_FILE% ps -q 2>/dev/null | wc -l"') do set RUNNING=%%R
+for /f %%R in ('ssh %SSH_OPTS% %SERVER% "cd %REMOTE_PATH% 2>/dev/null && docker compose --env-file prod.env -f %COMPOSE_FILE% ps -q 2>/dev/null | wc -l"') do set RUNNING=%%R
 
 if "%RUNNING%"=="0" (
     echo %IMAGE% is already down, nothing to do.
@@ -81,12 +83,12 @@ if "%RUNNING%"=="0" (
 
 REM Stop existing containers
 echo Stopping containers...
-ssh %SERVER% "cd %REMOTE_PATH% && docker compose --env-file prod.env -f %COMPOSE_FILE% down"
+ssh %SSH_OPTS% %SERVER% "cd %REMOTE_PATH% && docker compose --env-file prod.env -f %COMPOSE_FILE% down"
 IF ERRORLEVEL 1 GOTO :error
 
 REM Clean up unused Docker resources
 echo Cleaning up Docker...
-ssh %SERVER% "docker system prune -f"
+ssh %SSH_OPTS% %SERVER% "docker system prune -f"
 
 echo.
 echo %IMAGE% stopped successfully
@@ -98,11 +100,11 @@ REM === SCHEDULED DOWN ===
 
 REM Cancel any existing at jobs for this project
 echo Cancelling existing scheduled jobs for %IMAGE%...
-ssh %SERVER% "for job in $(atq | awk '{print $1}'); do at -c $job 2>/dev/null | grep -q 'cd %REMOTE_PATH%' && atrm $job && echo 'Removed job '$job; done"
+ssh %SSH_OPTS% %SERVER% "for job in $(atq | awk '{print $1}'); do at -c $job 2>/dev/null | grep -q 'cd %REMOTE_PATH%' && atrm $job && echo 'Removed job '$job; done"
 
 REM Schedule the down with at
 echo Scheduling container down at !DEPLOY_TIME!...
-ssh %SERVER% "echo 'cd %REMOTE_PATH% && docker compose --env-file prod.env -f %COMPOSE_FILE% ps -q | grep -q . && docker compose --env-file prod.env -f %COMPOSE_FILE% down && docker system prune -f' | at !DEPLOY_TIME!"
+ssh %SSH_OPTS% %SERVER% "echo 'cd %REMOTE_PATH% && docker compose --env-file prod.env -f %COMPOSE_FILE% ps -q | grep -q . && docker compose --env-file prod.env -f %COMPOSE_FILE% down && docker system prune -f' | at !DEPLOY_TIME!"
 IF ERRORLEVEL 1 (
     echo ERROR: Failed to schedule with at. Is atd running? ^(systemctl start atd^)
     goto :error

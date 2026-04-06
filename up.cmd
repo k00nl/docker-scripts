@@ -1,6 +1,8 @@
 @echo off
 setlocal enabledelayedexpansion
 
+set SSH_OPTS=-o ServerAliveInterval=15 -o ServerAliveCountMax=4
+
 REM Load SERVER_USER, SERVER_IP, IMAGE, COMPOSE_FILE from prod.env
 for /f "usebackq tokens=1,* delims==" %%A in ("prod.env") do (
     if "%%A"=="SERVER_USER"  set SERVER_USER=%%B
@@ -35,7 +37,7 @@ set REMOTE_PATH=/%IMAGE%
 REM Check if cancelling scheduled up: up.cmd stop at
 if /i "%~1"=="stop" if /i "%~2"=="at" (
     echo Cancelling scheduled ups for %IMAGE%...
-    ssh %SERVER% "for job in $(atq | awk '{print $1}'); do at -c $job 2>/dev/null | grep -q 'cd %REMOTE_PATH%' && atrm $job && echo 'Removed job '$job; done"
+    ssh %SSH_OPTS% %SERVER% "for job in $(atq | awk '{print $1}'); do at -c $job 2>/dev/null | grep -q 'cd %REMOTE_PATH%' && atrm $job && echo 'Removed job '$job; done"
     echo Done.
     pause
     exit /b 0
@@ -71,7 +73,7 @@ REM === IMMEDIATE UP ===
 
 REM Check if remote path and compose file exist
 echo Checking if deployment exists...
-ssh %SERVER% "test -f %REMOTE_PATH%/%COMPOSE_FILE%"
+ssh %SSH_OPTS% %SERVER% "test -f %REMOTE_PATH%/%COMPOSE_FILE%"
 IF ERRORLEVEL 1 (
     echo %IMAGE% has not been deployed yet, nothing to start.
     pause
@@ -80,7 +82,7 @@ IF ERRORLEVEL 1 (
 
 REM Check if already running
 echo Checking if containers are running...
-for /f %%R in ('ssh %SERVER% "cd %REMOTE_PATH% && docker compose --env-file prod.env -f %COMPOSE_FILE% ps -q 2>/dev/null | wc -l"') do set RUNNING=%%R
+for /f %%R in ('ssh %SSH_OPTS% %SERVER% "cd %REMOTE_PATH% && docker compose --env-file prod.env -f %COMPOSE_FILE% ps -q 2>/dev/null | wc -l"') do set RUNNING=%%R
 
 if not "%RUNNING%"=="0" (
     echo %IMAGE% is already running, nothing to do.
@@ -90,7 +92,7 @@ if not "%RUNNING%"=="0" (
 
 REM Start containers
 echo Starting containers...
-ssh %SERVER% "cd %REMOTE_PATH% && docker compose --env-file prod.env -f %COMPOSE_FILE% up -d"
+ssh %SSH_OPTS% %SERVER% "cd %REMOTE_PATH% && docker compose --env-file prod.env -f %COMPOSE_FILE% up -d"
 IF ERRORLEVEL 1 GOTO :error
 
 echo.
@@ -103,11 +105,11 @@ REM === SCHEDULED UP ===
 
 REM Cancel any existing at jobs for this project
 echo Cancelling existing scheduled jobs for %IMAGE%...
-ssh %SERVER% "for job in $(atq | awk '{print $1}'); do at -c $job 2>/dev/null | grep -q 'cd %REMOTE_PATH%' && atrm $job && echo 'Removed job '$job; done"
+ssh %SSH_OPTS% %SERVER% "for job in $(atq | awk '{print $1}'); do at -c $job 2>/dev/null | grep -q 'cd %REMOTE_PATH%' && atrm $job && echo 'Removed job '$job; done"
 
 REM Schedule the up with at (only starts if not already running)
 echo Scheduling container up at !DEPLOY_TIME!...
-ssh %SERVER% "echo 'cd %REMOTE_PATH% && test -f %COMPOSE_FILE% && [ $(docker compose --env-file prod.env -f %COMPOSE_FILE% ps -q 2>/dev/null | wc -l) -eq 0 ] && docker compose --env-file prod.env -f %COMPOSE_FILE% up -d' | at !DEPLOY_TIME!"
+ssh %SSH_OPTS% %SERVER% "echo 'cd %REMOTE_PATH% && test -f %COMPOSE_FILE% && [ $(docker compose --env-file prod.env -f %COMPOSE_FILE% ps -q 2>/dev/null | wc -l) -eq 0 ] && docker compose --env-file prod.env -f %COMPOSE_FILE% up -d' | at !DEPLOY_TIME!"
 IF ERRORLEVEL 1 (
     echo ERROR: Failed to schedule with at. Is atd running? ^(systemctl start atd^)
     goto :error
