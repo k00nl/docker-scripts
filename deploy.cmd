@@ -73,8 +73,14 @@ if /i "%~1"=="at" (
 )
 
 REM Step 0: Ensure remote directory exists and sync files
-echo Syncing files...
-tar cf - prod.env %COMPOSE_FILE% | ssh %SSH_OPTS% %SERVER% "mkdir -p %REMOTE_PATH% && cd %REMOTE_PATH% && tar xf -"
+REM   Optioneel: staat er een downloads.conf in de projectmap, dan gaat
+REM   die mee (voor een nginx downloads-service). De /downloads map wordt
+REM   alleen aangemaakt, nooit geleegd: bestanden upload je los met
+REM   upload.cmd, losgekoppeld van deploys.
+set SYNC_FILES=prod.env %COMPOSE_FILE%
+if exist downloads.conf set SYNC_FILES=%SYNC_FILES% downloads.conf
+echo Syncing files: %SYNC_FILES%
+tar cf - %SYNC_FILES% | ssh %SSH_OPTS% %SERVER% "mkdir -p %REMOTE_PATH% %REMOTE_PATH%/downloads && cd %REMOTE_PATH% && tar xf -"
 IF ERRORLEVEL 1 GOTO :error
 
 REM Step 3: Build image locally (no cache to ensure fresh TypeScript build)
